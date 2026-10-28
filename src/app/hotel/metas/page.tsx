@@ -1,0 +1,437 @@
+'use client';
+
+import { useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useRef, useState } from 'react';
+import { Icon } from '@/components/Icon';
+import { F, IsoRoom, THEMES, W } from '@/components/IsoRoom';
+import { Modal } from '@/components/Modal';
+import { RoomShell } from '@/components/RoomShell';
+import { Win } from '@/components/Win';
+import { PALETTE } from '@/lib/rooms';
+import { uid } from '@/lib/store';
+import { useItems, usePlayer } from '@/lib/session';
+import type { Item } from '@/lib/types';
+
+interface Step {
+  id: string;
+  text: string;
+  done: boolean;
+}
+interface GoalData {
+  category: string;
+  why: string;
+  deadline: string;
+  steps: Step[];
+  done: boolean;
+  reward: number;
+  color: string;
+}
+interface ProjectData {
+  status: 'idea' | 'doing' | 'done';
+  desc: string;
+  color: string;
+  due: string;
+  tags: string[];
+}
+
+const CATEGORIES = ['Salud', 'Estudios', 'Dinero', 'Personal', 'Trabajo', 'Creatividad', 'Social'];
+const COLUMNS: { id: ProjectData['status']; label: string; color: string }[] = [
+  { id: 'idea', label: 'IDEAS', color: 'var(--yellow)' },
+  { id: 'doing', label: 'EN CURSO', color: 'var(--cyan)' },
+  { id: 'done', label: 'HECHO', color: 'var(--green)' },
+];
+
+const newGoal = (): GoalData => ({ category: 'Personal', why: '', deadline: '', steps: [], done: false, reward: 50, color: '#39ff88' });
+const newProject = (status: ProjectData['status'] = 'idea'): ProjectData => ({ status, desc: '', color: '#ff8a3d', due: '', tags: [] });
+
+/* ---------------- Quests ---------------- */
+function GoalEditor({ goal, onClose }: { goal: Item<GoalData> | null; onClose: () => void }) {
+  const { create, update, remove } = useItems<GoalData>('goal');
+  const [title, setTitle] = useState(goal?.title ?? '');
+  const [d, setD] = useState<GoalData>({ ...newGoal(), ...goal?.data });
+  const [stepDraft, setStepDraft] = useState('');
+
+  const addStep = () => {
+    if (!stepDraft.trim()) return;
+    setD({ ...d, steps: [...d.steps, { id: uid(), text: stepDraft.trim(), done: false }] });
+    setStepDraft('');
+  };
+
+  return (
+    <Modal title={goal ? 'editar_quest' : 'nueva_quest'} onClose={onClose}>
+      <form
+        className="stack"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (goal) await update(goal.id, { title, data: d });
+          else await create('goal', title, d);
+          onClose();
+        }}
+      >
+        <label className="field">
+          <span>QUEST</span>
+          <input className="input" required autoFocus placeholder="Ej: Correr 5K" value={title} onChange={(e) => setTitle(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>¿POR QUÉ? (MOTIVACIÓN)</span>
+          <textarea className="textarea" rows={2} value={d.why} onChange={(e) => setD({ ...d, why: e.target.value })} />
+        </label>
+        <div className="grid" style={{ ['--min' as string]: '150px', gap: 10 }}>
+          <label className="field">
+            <span>CATEGORÍA</span>
+            <select className="select" value={d.category} onChange={(e) => setD({ ...d, category: e.target.value })}>
+              {CATEGORIES.map((c) => (
+                <option key={c}>{c}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>FECHA LÍMITE</span>
+            <input className="input" type="date" value={d.deadline} onChange={(e) => setD({ ...d, deadline: e.target.value })} />
+          </label>
+          <label className="field">
+            <span>RECOMPENSA XP</span>
+            <input className="input" type="number" min={10} max={500} step={10} value={d.reward} onChange={(e) => setD({ ...d, reward: Number(e.target.value) })} />
+          </label>
+        </div>
+        <div className="field">
+          <span>PASOS</span>
+          <ul className="steps">
+            {d.steps.map((s) => (
+              <li key={s.id}>
+                <input type="checkbox" checked={s.done} onChange={() => setD({ ...d, steps: d.steps.map((x) => (x.id === s.id ? { ...x, done: !x.done } : x)) })} />
+                <input className="input input--bare grow" value={s.text} onChange={(e) => setD({ ...d, steps: d.steps.map((x) => (x.id === s.id ? { ...x, text: e.target.value } : x)) })} />
+                <button type="button" className="icon-btn" onClick={() => setD({ ...d, steps: d.steps.filter((x) => x.id !== s.id) })} aria-label="Quitar paso">
+                  <Icon name="x" />
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="row row--tight">
+            <input className="input grow" placeholder="Nuevo paso + Enter" value={stepDraft} onChange={(e) => setStepDraft(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addStep())} />
+            <button type="button" className="btn btn-sm" onClick={addStep}>
+              <Icon name="plus" />
+            </button>
+          </div>
+        </div>
+        <div className="field">
+          <span>COLOR</span>
+          <div className="swatches">
+            {PALETTE.map((c) => (
+              <button type="button" key={c} className={`swatch${c === d.color ? ' is-on' : ''}`} style={{ background: c }} onClick={() => setD({ ...d, color: c })} aria-label={c} />
+            ))}
+          </div>
+        </div>
+        <div className="row" style={{ justifyContent: 'space-between' }}>
+          {goal ? (
+            <button type="button" className="btn btn-sm btn-danger" onClick={async () => confirm('¿Borrar quest?') && (await remove(goal.id), onClose())}>
+              <Icon name="trash" /> BORRAR
+            </button>
+          ) : (
+            <span />
+          )}
+          <button className="btn btn-solid">
+            <Icon name="save" /> GUARDAR
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function Quests({ openId }: { openId: string | null }) {
+  const { items, update } = useItems<GoalData>('goal');
+  const { addXP } = usePlayer();
+  const [editing, setEditing] = useState<Item<GoalData> | null | 'new'>(null);
+  const [showDone, setShowDone] = useState(false);
+
+  const handled = useRef<string | null>(null);
+  useEffect(() => {
+    const it = items.find((i) => i.id === openId);
+    if (it && handled.current !== openId) (handled.current = openId), setEditing(it);
+  }, [openId, items]);
+
+  const toggleStep = async (g: Item<GoalData>, s: Step) => {
+    const steps = g.data.steps.map((x) => (x.id === s.id ? { ...x, done: !x.done } : x));
+    await update(g.id, { data: { ...g.data, steps } });
+    if (!s.done) addXP(5, 'paso');
+  };
+  const completeQuest = async (g: Item<GoalData>) => {
+    await update(g.id, { data: { ...g.data, done: !g.data.done } });
+    if (!g.data.done) addXP(g.data.reward || 50, `quest: ${g.title}`);
+  };
+
+  const list = items.filter((g) => !!g.data.done === showDone);
+  const daysLeft = (date: string) => Math.ceil((new Date(date).getTime() - Date.now()) / 86400000);
+
+  return (
+    <>
+      <div className="row" style={{ marginBottom: 14 }}>
+        <button className="btn btn-solid" onClick={() => setEditing('new')}>
+          <Icon name="plus" /> NUEVA QUEST
+        </button>
+        <button className={`btn btn-sm${showDone ? ' btn-cyan' : ''}`} onClick={() => setShowDone(!showDone)}>
+          <Icon name="check" /> {showDone ? 'VER ACTIVAS' : `COMPLETADAS (${items.filter((g) => g.data.done).length})`}
+        </button>
+      </div>
+      {list.length ? (
+        <div className="grid" style={{ ['--min' as string]: '290px' }}>
+          {list.map((g) => {
+            const steps = g.data.steps ?? [];
+            const done = steps.filter((s) => s.done).length;
+            const pct = steps.length ? done / steps.length : g.data.done ? 1 : 0;
+            const left = g.data.deadline ? daysLeft(g.data.deadline) : null;
+            return (
+              <article key={g.id} className={`quest${g.data.done ? ' is-done' : ''}`} style={{ ['--c' as string]: g.data.color }}>
+                <div className="row" style={{ justifyContent: 'space-between' }}>
+                  <span className="badge" style={{ ['--c' as string]: g.data.color }}>{g.data.category.toUpperCase()}</span>
+                  <span className="px" style={{ fontSize: 8, color: 'var(--yellow)' }}>+{g.data.reward} XP</span>
+                </div>
+                <h3 className="card__title">★ {g.title}</h3>
+                {g.data.why && <p className="muted" style={{ margin: 0, fontSize: 17 }}>{g.data.why}</p>}
+                <div className="bar">
+                  <span style={{ width: `${pct * 100}%`, ['--c' as string]: g.data.color }} />
+                </div>
+                {steps.length > 0 && (
+                  <ul className="steps">
+                    {steps.map((s) => (
+                      <li key={s.id} className={s.done ? 'is-done' : ''}>
+                        <input type="checkbox" checked={s.done} onChange={() => toggleStep(g, s)} aria-label={s.text} />
+                        <span>{s.text}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="row" style={{ marginTop: 'auto', justifyContent: 'space-between' }}>
+                  <span className={left !== null && left < 0 ? '' : 'dim'} style={{ fontSize: 16, color: left !== null && left < 0 ? 'var(--red)' : undefined }}>
+                    {left === null ? `${done}/${steps.length} pasos` : left < 0 ? `venció hace ${-left}d` : `quedan ${left}d`}
+                  </span>
+                  <div className="row row--tight">
+                    <button className="icon-btn" onClick={() => setEditing(g)} aria-label="Editar">
+                      <Icon name="edit" />
+                    </button>
+                    <button className={`btn btn-sm${g.data.done ? '' : ' btn-cyan'}`} onClick={() => completeQuest(g)}>
+                      <Icon name={g.data.done ? 'reset' : 'check'} /> {g.data.done ? 'REABRIR' : 'COMPLETAR'}
+                    </button>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="empty">
+          <span className="px">{showDone ? 'SIN QUESTS COMPLETADAS' : 'NO HAY QUESTS ACTIVAS'}</span>
+          Divide tus metas en pasos pequeños y gana XP con cada uno.
+        </div>
+      )}
+      {editing && <GoalEditor goal={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
+    </>
+  );
+}
+
+/* ---------------- Proyectos (kanban) ---------------- */
+function ProjectEditor({ project, status, onClose }: { project: Item<ProjectData> | null; status: ProjectData['status']; onClose: () => void }) {
+  const { create, update, remove } = useItems<ProjectData>('project');
+  const [title, setTitle] = useState(project?.title ?? '');
+  const [d, setD] = useState<ProjectData>({ ...newProject(status), ...project?.data });
+  const [tags, setTags] = useState((project?.data.tags ?? []).join(', '));
+
+  return (
+    <Modal title={project ? 'editar_proyecto' : 'nuevo_proyecto'} onClose={onClose}>
+      <form
+        className="stack"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          const data = { ...d, tags: tags.split(',').map((t) => t.trim()).filter(Boolean) };
+          if (project) await update(project.id, { title, data });
+          else await create('project', title, data);
+          onClose();
+        }}
+      >
+        <label className="field">
+          <span>PROYECTO</span>
+          <input className="input" required autoFocus value={title} onChange={(e) => setTitle(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>DESCRIPCIÓN</span>
+          <textarea className="textarea" rows={4} value={d.desc} onChange={(e) => setD({ ...d, desc: e.target.value })} />
+        </label>
+        <div className="grid" style={{ ['--min' as string]: '150px', gap: 10 }}>
+          <label className="field">
+            <span>ESTADO</span>
+            <select className="select" value={d.status} onChange={(e) => setD({ ...d, status: e.target.value as ProjectData['status'] })}>
+              {COLUMNS.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>ENTREGA</span>
+            <input className="input" type="date" value={d.due} onChange={(e) => setD({ ...d, due: e.target.value })} />
+          </label>
+        </div>
+        <label className="field">
+          <span>ETIQUETAS (separadas por coma)</span>
+          <input className="input" value={tags} onChange={(e) => setTags(e.target.value)} />
+        </label>
+        <div className="field">
+          <span>COLOR</span>
+          <div className="swatches">
+            {PALETTE.map((c) => (
+              <button type="button" key={c} className={`swatch${c === d.color ? ' is-on' : ''}`} style={{ background: c }} onClick={() => setD({ ...d, color: c })} aria-label={c} />
+            ))}
+          </div>
+        </div>
+        <div className="row" style={{ justifyContent: 'space-between' }}>
+          {project ? (
+            <button type="button" className="btn btn-sm btn-danger" onClick={async () => confirm('¿Borrar proyecto?') && (await remove(project.id), onClose())}>
+              <Icon name="trash" /> BORRAR
+            </button>
+          ) : (
+            <span />
+          )}
+          <button className="btn btn-solid">
+            <Icon name="save" /> GUARDAR
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function Projects({ openId }: { openId: string | null }) {
+  const { items, update } = useItems<ProjectData>('project');
+  const { addXP } = usePlayer();
+  const [editing, setEditing] = useState<{ project: Item<ProjectData> | null; status: ProjectData['status'] } | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+
+  const handled = useRef<string | null>(null);
+  useEffect(() => {
+    const it = items.find((i) => i.id === openId);
+    if (it && handled.current !== openId) (handled.current = openId), setEditing({ project: it, status: it.data.status });
+  }, [openId, items]);
+
+  const move = async (id: string, status: ProjectData['status']) => {
+    const p = items.find((i) => i.id === id);
+    if (!p || p.data.status === status) return;
+    await update(id, { data: { ...p.data, status } });
+    if (status === 'done') addXP(30, `proyecto: ${p.title}`);
+  };
+
+  return (
+    <>
+      <div className="kanban">
+        {COLUMNS.map((col) => {
+          const cards = items.filter((p) => p.data.status === col.id);
+          return (
+            <section
+              key={col.id}
+              className={`kanban__col${over === col.id ? ' is-over' : ''}`}
+              style={{ ['--c' as string]: col.color }}
+              onDragOver={(e) => (e.preventDefault(), setOver(col.id))}
+              onDragLeave={() => setOver(null)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setOver(null);
+                move(e.dataTransfer.getData('text/plain'), col.id);
+              }}
+            >
+              <header className="kanban__head">
+                <span className="px" style={{ fontSize: 9, color: col.color }}>{col.label}</span>
+                <span className="dim">{cards.length}</span>
+                <button className="icon-btn" style={{ marginLeft: 'auto' }} onClick={() => setEditing({ project: null, status: col.id })} aria-label={`Añadir en ${col.label}`}>
+                  <Icon name="plus" />
+                </button>
+              </header>
+              {cards.map((p) => (
+                <article
+                  key={p.id}
+                  className="kanban__card"
+                  draggable
+                  onDragStart={(e) => e.dataTransfer.setData('text/plain', p.id)}
+                  onClick={() => setEditing({ project: p, status: p.data.status })}
+                  style={{ ['--pc' as string]: p.data.color }}
+                >
+                  <strong>{p.title}</strong>
+                  {p.data.desc && <p className="muted">{p.data.desc.slice(0, 120)}</p>}
+                  <div className="row row--tight">
+                    {p.data.tags?.map((t) => (
+                      <span key={t} className="tag">#{t}</span>
+                    ))}
+                    {p.data.due && <span className="dim" style={{ fontSize: 15, marginLeft: 'auto' }}><Icon name="calendar" /> {p.data.due}</span>}
+                  </div>
+                  <div className="kanban__move">
+                    {COLUMNS.filter((c) => c.id !== col.id).map((c) => (
+                      <button key={c.id} className="btn btn-sm btn-ghost" onClick={(e) => (e.stopPropagation(), move(p.id, c.id))}>
+                        → {c.label}
+                      </button>
+                    ))}
+                  </div>
+                </article>
+              ))}
+              {!cards.length && <p className="dim" style={{ textAlign: 'center', fontSize: 16 }}>Arrastra aquí</p>}
+            </section>
+          );
+        })}
+      </div>
+      {editing && <ProjectEditor project={editing.project} status={editing.status} onClose={() => setEditing(null)} />}
+    </>
+  );
+}
+
+function Metas() {
+  const params = useSearchParams();
+  const { profile } = usePlayer();
+  const { items: projects } = useItems('project');
+  const openId = params.get('open');
+  const [tab, setTab] = useState<'quests' | 'proyectos'>('quests');
+
+  useEffect(() => {
+    if (openId && projects.some((p) => p.id === openId)) setTab('proyectos');
+  }, [openId, projects]);
+
+  return (
+    <RoomShell
+      slug="metas"
+      actions={
+        <div className="row row--tight">
+          <button className={`btn btn-sm${tab === 'quests' ? ' btn-cyan' : ''}`} onClick={() => setTab('quests')}>
+            <Icon name="target" /> QUESTS
+          </button>
+          <button className={`btn btn-sm${tab === 'proyectos' ? ' btn-cyan' : ''}`} onClick={() => setTab('proyectos')}>
+            <Icon name="layers" /> PROYECTOS
+          </button>
+        </div>
+      }
+      scene={
+        <IsoRoom
+          theme={THEMES.mint}
+          avatar={profile.avatar}
+          walls={[W.poster('right', 0.8, '#39ff88', { label: 'QUESTS', onClick: () => setTab('quests') }), W.window('right', 3), W.poster('left', 1.2, '#ff8a3d', { label: 'PROYECTOS', onClick: () => setTab('proyectos') }), W.neon('left', 3.4, 7, '#39ff88')]}
+          furni={[
+            { id: 'board', x: 2, y: 0.1, boxes: F.board('#eaf6ff'), label: 'PROYECTOS', onClick: () => setTab('proyectos') },
+            { id: 't1', x: 5, y: 0.3, boxes: F.trophy(), label: 'QUESTS', onClick: () => setTab('quests') },
+            { id: 't2', x: 6, y: 0.3, boxes: F.trophy() },
+            { id: 'table', x: 3, y: 3, boxes: F.table('#2a7a5c', 2, 1.2), label: 'NUEVA QUEST', onClick: () => setTab('quests') },
+            { id: 'c1', x: 3.2, y: 4.3, boxes: F.chair('#39ff88') },
+            { id: 'plant', x: 0.2, y: 0.2, boxes: F.plant() },
+            { id: 'dumb', x: 0.4, y: 5.5, boxes: F.dumbbell() },
+          ]}
+        />
+      }
+    >
+      {tab === 'quests' ? <Quests openId={openId} /> : <Projects openId={openId} />}
+    </RoomShell>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense>
+      <Metas />
+    </Suspense>
+  );
+}
